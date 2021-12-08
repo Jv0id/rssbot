@@ -1,0 +1,8 @@
+nohup ./rssbot dataFile botToken &
+
+
+服务器使用的是：rssbot-v1.4.4-linux.zip
+
+
+dataFile为文件名，任意。
+botToken为bot的ID
