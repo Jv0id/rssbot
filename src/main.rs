@@ -1,7 +1,6 @@
-#![feature(error_generic_member_access, provide_any)]
+#![feature(error_reporter)]
 #![recursion_limit = "256"]
 
-use std::backtrace::Backtrace;
 use std::convert::TryInto;
 use std::env;
 use std::panic;
@@ -14,6 +13,7 @@ use hyper_proxy::{Intercept, Proxy};
 use once_cell::sync::OnceCell;
 use structopt::StructOpt;
 use tbot;
+use tbot::bot::Uri;
 use tokio::{self, sync::Mutex};
 
 // Include the tr! macro and localizations
@@ -83,6 +83,13 @@ pub struct Opt {
     /// Make bot commands only accessible for group admins.
     #[structopt(long)]
     restricted: bool,
+    /// Custom telegram api URI
+    #[structopt(
+        long,
+        value_name = "tgapi-uri",
+        default_value = "https://api.telegram.org/"
+    )]
+    api_uri: Uri,
     /// DANGER: Insecure mode, accept invalid TLS certificates
     #[structopt(long)]
     insecure: bool,
@@ -104,12 +111,12 @@ async fn main() -> anyhow::Result<()> {
 
     let opt = Opt::from_args();
     let db = Arc::new(Mutex::new(Database::open(opt.database.clone())?));
+    let bot_builder = tbot::bot::Builder::with_string_token(opt.token.clone())
+        .server_uri(opt.api_uri.clone());
     let bot = if let Some(proxy) = init_proxy() {
-        tbot::bot::Builder::with_string_token(opt.token.clone())
-            .proxy(proxy)
-            .build()
+        bot_builder.proxy(proxy).build()
     } else {
-        tbot::Bot::new(opt.token.clone())
+        bot_builder.build()
     };
     let me = bot
         .get_me()
@@ -159,29 +166,10 @@ fn init_proxy() -> Option<Proxy> {
 }
 
 fn print_error<E: std::error::Error>(err: E) {
-    eprintln!("Error: {}", err);
-
-    let mut err: &dyn std::error::Error = &err;
-    let mut deepest_backtrace = err.request_ref::<Backtrace>();
-    if let Some(e) = err.source() {
-        eprintln!("\nCaused by:");
-        let multiple = e.source().is_some();
-        let mut line_counter = 0..;
-        while let (Some(e), Some(line)) = (err.source(), line_counter.next()) {
-            if multiple {
-                eprint!("{: >4}: ", line)
-            } else {
-                eprint!("    ")
-            };
-            eprintln!("{}", e);
-            if let Some(backtrace) = e.request_ref::<Backtrace>() {
-                deepest_backtrace = Some(backtrace);
-            }
-            err = e;
-        }
-    }
-
-    if let Some(backtrace) = deepest_backtrace {
-        eprintln!("\nBacktrace:\n{}", backtrace);
-    }
+    eprintln!(
+        "Error: {}",
+        std::error::Report::new(err)
+            .pretty(true)
+            .show_backtrace(true)
+    );
 }
